@@ -50,157 +50,101 @@ COLOR_NAMES = [
     "orange", "maroon", "green", "purple",
 ]
 
-# ── Tool schemas (Anthropic tool_use format) ─────────────────────────────────
-TOOL_SCHEMAS: list[dict[str, Any]] = [
-    {
+# ── All tool schemas ─────────────────────────────────────────────────────────
+# Indexed by GameAction enum value for dynamic filtering
+
+ALL_TOOL_SCHEMAS: dict[int, dict[str, Any]] = {
+    0: {
         "name": "reset",
-        "description": "Reset the current level. Use when stuck or game over.",
+        "description": "Reset the current level. Use only when completely stuck.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why you are resetting.",
-                },
+                "reasoning": {"type": "string", "description": "Why you are resetting."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    1: {
         "name": "move_up",
-        "description": "Move up one cell on the grid.",
+        "description": "Move up on the grid.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why this move.",
-                },
-                "expected_outcome": {
-                    "type": "string",
-                    "description": "What you expect to happen.",
-                },
+                "reasoning": {"type": "string", "description": "Why this move."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    2: {
         "name": "move_down",
-        "description": "Move down one cell on the grid.",
+        "description": "Move down on the grid.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why this move.",
-                },
-                "expected_outcome": {
-                    "type": "string",
-                    "description": "What you expect to happen.",
-                },
+                "reasoning": {"type": "string", "description": "Why this move."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    3: {
         "name": "move_left",
-        "description": "Move left one cell on the grid.",
+        "description": "Move left on the grid.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why this move.",
-                },
-                "expected_outcome": {
-                    "type": "string",
-                    "description": "What you expect to happen.",
-                },
+                "reasoning": {"type": "string", "description": "Why this move."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    4: {
         "name": "move_right",
-        "description": "Move right one cell on the grid.",
+        "description": "Move right on the grid.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why this move.",
-                },
-                "expected_outcome": {
-                    "type": "string",
-                    "description": "What you expect to happen.",
-                },
+                "reasoning": {"type": "string", "description": "Why this move."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    5: {
         "name": "confirm",
-        "description": "Confirm / perform action (submit answer, activate, etc.).",
+        "description": "Confirm / perform action (submit answer, activate).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why you are confirming.",
-                },
-                "expected_outcome": {
-                    "type": "string",
-                    "description": "What you expect to happen.",
-                },
+                "reasoning": {"type": "string", "description": "Why confirming."},
             },
             "required": ["reasoning"],
         },
     },
-    {
+    6: {
         "name": "click",
         "description": "Click a specific cell on the 64x64 grid.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "x": {
-                    "type": "integer",
-                    "description": "X coordinate (0-63, left to right).",
-                    "minimum": 0,
-                    "maximum": 63,
-                },
-                "y": {
-                    "type": "integer",
-                    "description": "Y coordinate (0-63, top to bottom).",
-                    "minimum": 0,
-                    "maximum": 63,
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why you are clicking here.",
-                },
-                "target_object": {
-                    "type": "string",
-                    "description": "What object you are targeting.",
-                },
+                "x": {"type": "integer", "description": "X coord (0-63).", "minimum": 0, "maximum": 63},
+                "y": {"type": "integer", "description": "Y coord (0-63).", "minimum": 0, "maximum": 63},
+                "reasoning": {"type": "string", "description": "Why clicking here."},
             },
             "required": ["x", "y", "reasoning"],
         },
     },
-    {
+    7: {
         "name": "undo",
         "description": "Undo the last action.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why you are undoing.",
-                },
+                "reasoning": {"type": "string", "description": "Why undoing."},
             },
             "required": ["reasoning"],
         },
     },
-]
+}
 
 TOOL_TO_ACTION: dict[str, GameAction] = {
     "reset": GameAction.RESET,
@@ -215,23 +159,19 @@ TOOL_TO_ACTION: dict[str, GameAction] = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ClaudeVision — Grid rendering & diffing
+# ClaudeVision — Grid rendering, diffing, object detection
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class ClaudeVision:
-    """Renders 64x64 ARC grids as annotated PNGs and computes diffs."""
+    """Renders 64x64 ARC grids as annotated PNGs and extracts spatial info."""
 
     SCALE = 8  # 64 * 8 = 512
     IMG_SIZE = 64 * SCALE  # 512
 
     @staticmethod
     def render_frame(frame_3d: list[list[list[int]]]) -> str:
-        """Render a 3D frame (list of 64x64 grids) to a base64 PNG.
-
-        Takes the last layer as the visible frame, scales to 512x512,
-        and adds axis labels every 8 cells.
-        """
+        """Render a 3D frame to a base64 PNG (512x512 with grid lines)."""
         grid = frame_3d[-1] if frame_3d else [[0] * 64 for _ in range(64)]
 
         raw = bytearray()
@@ -245,7 +185,6 @@ class ClaudeVision:
             (ClaudeVision.IMG_SIZE, ClaudeVision.IMG_SIZE), Image.NEAREST
         )
 
-        # Add light grid lines every 8 cells and axis labels
         draw = ImageDraw.Draw(img)
         try:
             font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
@@ -256,19 +195,8 @@ class ClaudeVision:
         for i in range(0, 65, 8):
             pos = i * scale
             if pos < ClaudeVision.IMG_SIZE:
-                # vertical grid line
-                draw.line(
-                    [(pos, 0), (pos, ClaudeVision.IMG_SIZE - 1)],
-                    fill=(255, 255, 255, 60),
-                    width=1,
-                )
-                # horizontal grid line
-                draw.line(
-                    [(0, pos), (ClaudeVision.IMG_SIZE - 1, pos)],
-                    fill=(255, 255, 255, 60),
-                    width=1,
-                )
-                # axis labels
+                draw.line([(pos, 0), (pos, ClaudeVision.IMG_SIZE - 1)], fill=(255, 255, 255, 60), width=1)
+                draw.line([(0, pos), (ClaudeVision.IMG_SIZE - 1, pos)], fill=(255, 255, 255, 60), width=1)
                 if i < 64:
                     draw.text((pos + 2, 1), str(i), fill=(255, 255, 0, 180), font=font)
                     draw.text((1, pos + 2), str(i), fill=(255, 255, 0, 180), font=font)
@@ -285,7 +213,6 @@ class ClaudeVision:
         arr_b = np.array(grid_b, dtype=np.uint8)
         diff_mask = arr_a != arr_b
 
-        # Build diff image: red where changed, black elsewhere
         diff_rgb = np.zeros((64, 64, 3), dtype=np.uint8)
         diff_rgb[diff_mask] = [255, 0, 0]
 
@@ -303,25 +230,80 @@ class ClaudeVision:
         return hashlib.md5(raw).hexdigest()[:12]
 
     @staticmethod
-    def compress_grid_text(grid: list[list[int]]) -> str:
-        """Run-length encode a 2D grid for supplementary text context."""
-        lines = []
-        for y, row in enumerate(grid):
-            if y % 8 != 0:
+    def extract_objects(frame_3d: list[list[list[int]]]) -> str:
+        """Extract colored object positions as structured text.
+
+        Identifies non-background objects, their bounding boxes, and centroids.
+        This gives Claude precise spatial data without relying on vision alone.
+        """
+        grid = frame_3d[-1] if frame_3d else [[0] * 64 for _ in range(64)]
+        arr = np.array(grid, dtype=np.uint8)
+
+        # Determine background color (most common)
+        unique, counts = np.unique(arr, return_counts=True)
+        bg_color = unique[np.argmax(counts)]
+
+        # Also skip the second most common (likely walls/border)
+        skip_colors = set()
+        for c, cnt in zip(unique, counts):
+            if cnt > 500:  # more than ~12% of grid
+                skip_colors.add(int(c))
+
+        objects = []
+        for c in unique:
+            c = int(c)
+            if c in skip_colors:
                 continue
-            runs: list[str] = []
-            prev, count = row[0], 1
-            for cell in row[1:]:
-                if cell == prev:
-                    count += 1
-                else:
-                    name = COLOR_NAMES[prev] if 0 <= prev < 16 else str(prev)
-                    runs.append(f"{name}x{count}" if count > 1 else name)
-                    prev, count = cell, 1
-            name = COLOR_NAMES[prev] if 0 <= prev < 16 else str(prev)
-            runs.append(f"{name}x{count}" if count > 1 else name)
-            lines.append(f"y{y}: {' '.join(runs)}")
+            cnt = int(np.sum(arr == c))
+            if cnt == 0:
+                continue
+            ys, xs = np.where(arr == c)
+            cx, cy = int(np.mean(xs)), int(np.mean(ys))
+            objects.append({
+                "color": c,
+                "name": COLOR_NAMES[c] if c < 16 else str(c),
+                "pixels": cnt,
+                "bbox": f"x=[{int(xs.min())}-{int(xs.max())}] y=[{int(ys.min())}-{int(ys.max())}]",
+                "center": f"({cx},{cy})",
+            })
+
+        if not objects:
+            return "No distinct objects detected."
+
+        lines = []
+        for o in sorted(objects, key=lambda x: -x["pixels"]):
+            lines.append(
+                f"- {o['name']} ({o['pixels']}px): {o['bbox']}, center {o['center']}"
+            )
         return "\n".join(lines)
+
+    @staticmethod
+    def detect_changes(frame_a: list[list[list[int]]], frame_b: list[list[list[int]]]) -> str:
+        """Describe what changed between two frames in text."""
+        grid_a = frame_a[-1] if frame_a else [[0] * 64 for _ in range(64)]
+        grid_b = frame_b[-1] if frame_b else [[0] * 64 for _ in range(64)]
+
+        arr_a = np.array(grid_a, dtype=np.uint8)
+        arr_b = np.array(grid_b, dtype=np.uint8)
+
+        if np.array_equal(arr_a, arr_b):
+            return "No pixels changed."
+
+        diff_mask = arr_a != arr_b
+        changed_count = int(np.sum(diff_mask))
+        ys, xs = np.where(diff_mask)
+
+        # What colors appeared/disappeared
+        old_colors = set(arr_a[diff_mask].tolist())
+        new_colors = set(arr_b[diff_mask].tolist())
+
+        parts = [f"{changed_count} pixels changed in region x=[{xs.min()}-{xs.max()}] y=[{ys.min()}-{ys.max()}]."]
+
+        old_names = [COLOR_NAMES[c] for c in old_colors if c < 16]
+        new_names = [COLOR_NAMES[c] for c in new_colors if c < 16]
+        parts.append(f"Old colors: {', '.join(old_names)}. New colors: {', '.join(new_names)}.")
+
+        return " ".join(parts)
 
     @staticmethod
     def _img_to_base64(img: Image.Image) -> str:
@@ -343,6 +325,7 @@ class ClaudeReasoner:
         self.confirmed_rules: list[str] = []
         self.action_log: list[dict[str, Any]] = []
         self.stuck_counter: int = 0
+        self.no_progress_counter: int = 0  # tracks no level progress across resets
         self._last_hash: str = ""
 
     def on_level_complete(self) -> None:
@@ -350,10 +333,10 @@ class ClaudeReasoner:
         self.hypotheses.clear()
         self.action_log.clear()
         self.stuck_counter = 0
+        self.no_progress_counter = 0
         self._last_hash = ""
 
     def update_stuck(self, current_hash: str) -> None:
-        """Update stuck counter based on frame hash."""
         if current_hash == self._last_hash:
             self.stuck_counter += 1
         else:
@@ -366,74 +349,53 @@ class ClaudeReasoner:
         tool_input: dict[str, Any],
         frame_changed: bool,
     ) -> None:
-        """Record action and whether it had an effect."""
         entry = {
             "action": action_name,
             "reasoning": tool_input.get("reasoning", ""),
-            "expected": tool_input.get("expected_outcome", ""),
             "frame_changed": frame_changed,
         }
         self.action_log.append(entry)
 
-        # Auto-promote: if we predicted something and it happened
-        if frame_changed and tool_input.get("expected_outcome"):
+        if frame_changed:
             for h in self.hypotheses:
                 if h["confidence"] >= 0.7:
                     rule = h["text"]
                     if rule not in self.confirmed_rules:
                         self.confirmed_rules.append(rule)
 
-    def add_hypothesis(self, text: str, confidence: float, evidence: str) -> None:
-        # Avoid exact duplicates
-        for h in self.hypotheses:
-            if h["text"] == text:
-                h["confidence"] = max(h["confidence"], confidence)
-                return
-        self.hypotheses.append(
-            {"text": text, "confidence": confidence, "evidence": evidence}
-        )
-
     def get_rules_text(self) -> str:
         if not self.confirmed_rules:
-            return "No confirmed rules yet."
-        return "\n".join(f"- {r}" for r in self.confirmed_rules)
+            return "None yet."
+        return "\n".join(f"- {r}" for r in self.confirmed_rules[-8:])
 
     def get_hypotheses_text(self) -> str:
         if not self.hypotheses:
-            return "No active hypotheses."
+            return "None yet."
         lines = []
-        for h in sorted(self.hypotheses, key=lambda x: -x["confidence"]):
-            lines.append(
-                f"- [{h['confidence']:.0%}] {h['text']} (evidence: {h['evidence']})"
-            )
+        for h in sorted(self.hypotheses, key=lambda x: -x["confidence"])[:5]:
+            lines.append(f"- [{h['confidence']:.0%}] {h['text']}")
         return "\n".join(lines)
 
-    def get_recent_actions_text(self, n: int = 8) -> str:
+    def get_recent_actions_text(self, n: int = 10) -> str:
         if not self.action_log:
-            return "No actions taken yet."
+            return "None yet."
         recent = self.action_log[-n:]
         lines = []
         for a in recent:
-            changed = "changed" if a["frame_changed"] else "NO CHANGE"
-            lines.append(f"- {a['action']}: {a['reasoning'][:80]} [{changed}]")
+            changed = "Y" if a["frame_changed"] else "N"
+            lines.append(f"  {a['action']:12s} [{changed}] {a['reasoning'][:60]}")
         return "\n".join(lines)
 
     def get_stuck_guidance(self) -> str:
-        if self.stuck_counter >= 12:
+        if self.stuck_counter >= 8:
             return (
-                "CRITICAL: You have been stuck for 12+ actions with no frame change. "
-                "You MUST call reset to restart this level with your accumulated knowledge."
+                "CRITICAL: 8+ actions with no frame change. You are blocked. "
+                "Try the OPPOSITE direction or a completely different approach."
             )
-        if self.stuck_counter >= 5:
+        if self.stuck_counter >= 4:
             return (
-                "WARNING: 5+ actions with no change. Do a full re-analysis of the grid. "
-                "Try completely different actions — click on objects, try confirm, "
-                "or move in directions you haven't tried."
-            )
-        if self.stuck_counter >= 3:
-            return (
-                "HINT: 3 actions with no frame change. Try an action you haven't "
-                "attempted yet. Consider clicking on colored objects or using confirm."
+                "WARNING: 4+ actions with no change. Your current approach isn't working. "
+                "Try a different direction."
             )
         return ""
 
@@ -448,8 +410,11 @@ class ClaudeAgent(Agent):
 
     MODEL = "claude-sonnet-4-5-20250929"
     MAX_ACTIONS = 200
-    MAX_HISTORY_TURNS = 6  # 12 messages in sliding window
-    MAX_TOKENS = 1024
+    MAX_HISTORY_TURNS = 4  # keep context tight for efficiency
+    MAX_TOKENS = 512  # tool calls are short
+
+    # Send image every N actions (text-only in between saves ~7k tokens/turn)
+    IMAGE_EVERY_N = 3
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -464,6 +429,8 @@ class ClaudeAgent(Agent):
         self._prev_frame: Optional[list[list[list[int]]]] = None
         self._last_tool_name: str = ""
         self._last_tool_input: dict[str, Any] = {}
+        self._available_actions: list[int] = []
+        self._turns_since_image: int = 0
         self.input_tokens: int = 0
         self.output_tokens: int = 0
 
@@ -483,6 +450,7 @@ class ClaudeAgent(Agent):
             self.message_history.clear()
             self._prev_frame = None
             self._prev_frame_hash = ""
+            self._turns_since_image = 0
             return GameAction.RESET
 
         # ── 2. Detect level transition ───────────────────────────────────
@@ -492,13 +460,16 @@ class ClaudeAgent(Agent):
             )
             self.reasoner.on_level_complete()
             self.message_history.clear()
+            self._turns_since_image = 0
         self._prev_levels_completed = latest_frame.levels_completed
 
-        # ── 3. Update stuck counter ──────────────────────────────────────
+        # ── 3. Track available actions ───────────────────────────────────
+        self._available_actions = latest_frame.available_actions
+
+        # ── 4. Update stuck counter ──────────────────────────────────────
         current_hash = self.vision.frame_hash(latest_frame.frame)
         frame_changed = current_hash != self._prev_frame_hash
 
-        # Record outcome of previous action
         if self._last_tool_name and self._prev_frame_hash:
             self.reasoner.record_outcome(
                 self._last_tool_name, self._last_tool_input, frame_changed
@@ -507,28 +478,52 @@ class ClaudeAgent(Agent):
         self.reasoner.update_stuck(current_hash)
 
         # Force reset if stuck too long
-        if self.reasoner.stuck_counter >= 12:
-            logger.info("Stuck for 12+ actions, forcing RESET")
+        if self.reasoner.stuck_counter >= 10:
+            logger.info("Stuck for 10+ actions, forcing RESET")
             self.reasoner.stuck_counter = 0
+            self.reasoner.no_progress_counter += 1
+            self.message_history.clear()
+            self._turns_since_image = 0
             return GameAction.RESET
 
-        # ── 4. Render current frame ──────────────────────────────────────
-        frame_b64 = self.vision.render_frame(latest_frame.frame)
+        # ── 5. Build tools (filtered to available_actions) ───────────────
+        tools = self._get_available_tools()
 
-        # ── 5. Render diff if previous frame exists ──────────────────────
-        diff_b64: Optional[str] = None
-        if self._prev_frame is not None:
-            diff_b64 = self.vision.render_diff(self._prev_frame, latest_frame.frame)
-
-        # ── 6. Build system prompt ───────────────────────────────────────
-        system_prompt = self._build_system_prompt()
-
-        # ── 7. Build user message ────────────────────────────────────────
-        user_content = self._build_user_message(
-            latest_frame, frame_b64, diff_b64, frame_changed
+        # ── 6. Decide whether to include image this turn ─────────────────
+        send_image = (
+            self._turns_since_image >= self.IMAGE_EVERY_N
+            or self._prev_frame is None  # first frame
+            or frame_changed  # something changed, worth seeing
+            or self.reasoner.stuck_counter >= 3  # stuck, need fresh look
         )
 
-        # ── 8. Call Claude ───────────────────────────────────────────────
+        # ── 7. Render visuals ────────────────────────────────────────────
+        frame_b64: Optional[str] = None
+        diff_b64: Optional[str] = None
+        if send_image:
+            frame_b64 = self.vision.render_frame(latest_frame.frame)
+            if self._prev_frame is not None and frame_changed:
+                diff_b64 = self.vision.render_diff(self._prev_frame, latest_frame.frame)
+            self._turns_since_image = 0
+        else:
+            self._turns_since_image += 1
+
+        # ── 8. Extract object positions (always — cheap text) ────────────
+        objects_text = self.vision.extract_objects(latest_frame.frame)
+        changes_text = ""
+        if self._prev_frame is not None:
+            changes_text = self.vision.detect_changes(self._prev_frame, latest_frame.frame)
+
+        # ── 9. Build system prompt ───────────────────────────────────────
+        system_prompt = self._build_system_prompt()
+
+        # ── 10. Build user message ───────────────────────────────────────
+        user_content = self._build_user_message(
+            latest_frame, frame_b64, diff_b64, frame_changed,
+            objects_text, changes_text,
+        )
+
+        # ── 11. Call Claude ──────────────────────────────────────────────
         messages = [*self.message_history, {"role": "user", "content": user_content}]
 
         try:
@@ -542,89 +537,85 @@ class ClaudeAgent(Agent):
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                tools=TOOL_SCHEMAS,
+                tools=tools,
                 tool_choice={"type": "any"},
                 messages=messages,
             )
         except anthropic.APIError as e:
             logger.error(f"Claude API error: {e}")
-            # Fallback: try with fewer messages
             messages = [{"role": "user", "content": user_content}]
             response = self.client.messages.create(
                 model=self.MODEL,
                 max_tokens=self.MAX_TOKENS,
                 system=[{"type": "text", "text": system_prompt}],
-                tools=TOOL_SCHEMAS,
+                tools=tools,
                 tool_choice={"type": "any"},
                 messages=messages,
             )
 
-        # Track tokens
         self.input_tokens += response.usage.input_tokens
         self.output_tokens += response.usage.output_tokens
 
-        # ── 9. Extract tool call ─────────────────────────────────────────
+        # ── 12. Extract tool call ────────────────────────────────────────
         tool_name, tool_input = self._extract_tool_call(response)
 
-        # ── 10. Map to GameAction ────────────────────────────────────────
+        # ── 13. Map to GameAction ────────────────────────────────────────
         action = TOOL_TO_ACTION.get(tool_name, GameAction.RESET)
+
+        # Validate action is actually available
+        if action.value not in self._available_actions and action != GameAction.RESET:
+            logger.warning(f"Claude chose unavailable action {tool_name}, falling back to first available")
+            if self._available_actions:
+                action = GameAction.from_id(self._available_actions[0])
+            else:
+                action = GameAction.RESET
 
         if action == GameAction.ACTION6:  # click
             x = max(0, min(63, tool_input.get("x", 0)))
             y = max(0, min(63, tool_input.get("y", 0)))
             action.set_data({"x": x, "y": y})
 
-        # Attach reasoning metadata
         action.reasoning = {
             "tool": tool_name,
             "reasoning": tool_input.get("reasoning", ""),
-            "expected_outcome": tool_input.get("expected_outcome", ""),
-            "stuck_counter": self.reasoner.stuck_counter,
+            "stuck": self.reasoner.stuck_counter,
             "tokens": [self.input_tokens, self.output_tokens],
         }
 
-        # ── 11. Update message history ───────────────────────────────────
-        # Add user message
+        # ── 14. Update message history ───────────────────────────────────
         self.message_history.append({"role": "user", "content": user_content})
 
-        # Add assistant response (reconstruct from tool use)
         assistant_content = []
         for block in response.content:
             if block.type == "text":
                 assistant_content.append({"type": "text", "text": block.text})
             elif block.type == "tool_use":
-                assistant_content.append(
-                    {
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                    }
-                )
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
         self.message_history.append({"role": "assistant", "content": assistant_content})
 
-        # Add tool result stub so conversation stays valid
         tool_use_block = next(
             (b for b in response.content if b.type == "tool_use"), None
         )
         if tool_use_block:
-            self.message_history.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_block.id,
-                            "content": "Action submitted. Observe the next frame to see the result.",
-                        }
-                    ],
-                }
-            )
+            self.message_history.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_block.id,
+                        "content": "OK. Next frame follows.",
+                    }
+                ],
+            })
 
-        # Sliding window eviction (keep first observation + last N turns)
         self._evict_history()
 
-        # ── 12. Save state for next iteration ────────────────────────────
+        # ── 15. Save state ───────────────────────────────────────────────
         self._prev_frame = latest_frame.frame
         self._prev_frame_hash = current_hash
         self._last_tool_name = tool_name
@@ -639,120 +630,116 @@ class ClaudeAgent(Agent):
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
+    def _get_available_tools(self) -> list[dict[str, Any]]:
+        """Return only tools matching the game's available_actions."""
+        if not self._available_actions:
+            # Fallback: offer all tools
+            return list(ALL_TOOL_SCHEMAS.values())
+
+        tools = []
+        for action_id in self._available_actions:
+            if action_id in ALL_TOOL_SCHEMAS:
+                tools.append(ALL_TOOL_SCHEMAS[action_id])
+
+        # Always include reset as escape hatch
+        if 0 not in self._available_actions:
+            tools.append(ALL_TOOL_SCHEMAS[0])
+
+        return tools if tools else list(ALL_TOOL_SCHEMAS.values())
+
     def _build_system_prompt(self) -> str:
-        stuck_guidance = self.reasoner.get_stuck_guidance()
-        stuck_section = f"\n\n## STUCK ALERT\n{stuck_guidance}" if stuck_guidance else ""
+        stuck = self.reasoner.get_stuck_guidance()
+        stuck_section = f"\n\n**{stuck}**" if stuck else ""
 
-        return f"""You are an expert ARC-AGI-3 puzzle agent. You interact with a 64x64 grid-based \
-environment by choosing actions (move, click, confirm, undo, reset) to solve multi-level puzzles.
+        return f"""You are an expert ARC-AGI-3 puzzle agent navigating a 64x64 grid environment.
 
-## Methodology
-1. OBSERVE: Carefully examine the current frame image. Note object positions, colors, patterns.
-2. COMPARE: If a diff image is shown, identify exactly what changed from your last action.
-3. HYPOTHESIZE: Form theories about game rules based on observations and action outcomes.
-4. PLAN: Decide what to test or accomplish next. Think 2-3 steps ahead.
-5. ACT: Choose ONE action using the available tools. Explain your reasoning.
+GOAL: Solve each level as efficiently as possible. Minimize wasted moves.
 
-## Confirmed Rules
+STRATEGY:
+1. On first seeing a level, identify: your avatar/player object, the goal/target, obstacles, and any UI elements (timers, score bars).
+2. Plan a path from your current position toward the goal. Move deliberately — each move should bring you closer to the objective.
+3. After each move, check: did the frame change? Did you move in the expected direction? Are there walls blocking you?
+4. If blocked (wall/obstacle), immediately try a different direction to route around it.
+5. Look for patterns: colored objects often have meaning (goals, keys, doors, switches).
+6. A shrinking bar usually means limited moves/time — be efficient!
+
+RULES LEARNED:
 {self.reasoner.get_rules_text()}
 
-## Active Hypotheses
+HYPOTHESES:
 {self.reasoner.get_hypotheses_text()}
 
-## Key Guidelines
-- The grid is 64x64. Coordinates: x=0-63 (left to right), y=0-63 (top to bottom).
-- Images have grid lines every 8 cells with axis labels in yellow.
-- Colors: {', '.join(f'{i}={COLOR_NAMES[i]}' for i in range(16))}
-- Prefer movement and confirm before clicking. Click is for targeting specific objects.
-- If an action has no effect, try something different — don't repeat failed actions.
-- Each level may have different rules. Learn by experimenting systematically.{stuck_section}"""
+SPATIAL REASONING:
+- Grid is 64x64. x=0 is left, x=63 is right. y=0 is top, y=63 is bottom.
+- Objects are described by bounding box and center coordinates.
+- "Move up" decreases y. "Move down" increases y. "Move left" decreases x. "Move right" increases x.
+- To reach a target at lower-right from upper-left, you need move_down and move_right.
+
+BE CONCISE: Just pick the best action. Don't overthink.{stuck_section}"""
 
     def _build_user_message(
         self,
         frame: FrameData,
-        frame_b64: str,
+        frame_b64: Optional[str],
         diff_b64: Optional[str],
         frame_changed: bool,
+        objects_text: str,
+        changes_text: str,
     ) -> list[dict[str, Any]]:
         content: list[dict[str, Any]] = []
 
-        # Current frame image
-        content.append(
-            {
+        # Image (only when sending)
+        if frame_b64 is not None:
+            content.append({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": frame_b64,
-                },
-            }
-        )
+                "source": {"type": "base64", "media_type": "image/png", "data": frame_b64},
+            })
 
-        # Diff image if available
         if diff_b64 is not None:
-            content.append({"type": "text", "text": "Diff (red = changed pixels):"})
-            content.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": diff_b64,
-                    },
-                }
-            )
+            content.append({"type": "text", "text": "Diff (red = changed):"})
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": diff_b64},
+            })
 
-        # Text context
-        state_text = f"""## Current State
-- Game state: {frame.state.value}
-- Levels completed: {frame.levels_completed} / {frame.win_levels}
-- Action #{self.action_counter} of {self.MAX_ACTIONS}
-- Available actions: {[GameAction.from_id(a).name for a in frame.available_actions]}"""
+        # Build compact text context
+        parts = []
+        parts.append(f"Level {frame.levels_completed}/{frame.win_levels} | Action #{self.action_counter}/{self.MAX_ACTIONS}")
 
         if self._last_tool_name:
-            change_text = "Frame CHANGED" if frame_changed else "Frame UNCHANGED (no effect)"
-            state_text += f"""
+            status = "CHANGED" if frame_changed else "NO EFFECT"
+            parts.append(f"Last: {self._last_tool_name} → {status}")
 
-## Last Action Result
-- Action: {self._last_tool_name}
-- Result: {change_text}"""
+        if changes_text and changes_text != "No pixels changed.":
+            parts.append(f"Changes: {changes_text}")
 
-        recent = self.reasoner.get_recent_actions_text(6)
-        state_text += f"""
+        parts.append(f"\nObjects:\n{objects_text}")
+        parts.append(f"\nRecent actions (Y=changed, N=no effect):\n{self.reasoner.get_recent_actions_text()}")
+        parts.append("\nChoose your next move.")
 
-## Recent Action History
-{recent}"""
-
-        state_text += "\n\nAnalyze the frame and choose your next action."
-
-        content.append({"type": "text", "text": state_text})
+        content.append({"type": "text", "text": "\n".join(parts)})
 
         return content
 
-    def _extract_tool_call(
-        self, response: Any
-    ) -> tuple[str, dict[str, Any]]:
-        """Extract tool name and input from Claude's response."""
+    def _extract_tool_call(self, response: Any) -> tuple[str, dict[str, Any]]:
         for block in response.content:
             if block.type == "tool_use":
                 return block.name, block.input
-        # Fallback if no tool call found
-        logger.warning("No tool call in Claude response, defaulting to move_right")
-        return "move_right", {"reasoning": "fallback — no tool call returned"}
+        logger.warning("No tool call in response, defaulting to first available action")
+        if self._available_actions:
+            action = GameAction.from_id(self._available_actions[0])
+            name = next(k for k, v in TOOL_TO_ACTION.items() if v == action)
+            return name, {"reasoning": "fallback"}
+        return "reset", {"reasoning": "fallback"}
 
     def _evict_history(self) -> None:
-        """Keep message history within sliding window bounds.
-
-        Each 'turn' is 3 messages: user, assistant, tool_result.
-        Keep the first turn (initial observation) and the last MAX_HISTORY_TURNS turns.
-        """
+        """Sliding window: keep first turn + last N turns."""
         msgs_per_turn = 3
         max_msgs = self.MAX_HISTORY_TURNS * msgs_per_turn
 
         if len(self.message_history) <= max_msgs:
             return
 
-        # Keep first turn + last (MAX_HISTORY_TURNS - 1) turns
         first_turn = self.message_history[:msgs_per_turn]
         remaining = self.message_history[msgs_per_turn:]
         keep_msgs = (self.MAX_HISTORY_TURNS - 1) * msgs_per_turn
