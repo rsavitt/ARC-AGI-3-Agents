@@ -283,9 +283,13 @@ class ClaudeVision:
 
     @staticmethod
     def content_hash(frame_3d: list[list[list[int]]]) -> str:
-        """Hash ignoring timer bar (last 2 rows) for stuck detection."""
+        """Hash ignoring timer bars (first row + last 2 rows) for stuck detection.
+
+        Timer bars can appear at the top (row 0, e.g. vc33) or bottom (rows 62-63, e.g. ft09/ls20).
+        Strip both to ensure stuck detection works across all game types.
+        """
         grid = frame_3d[-1] if frame_3d else []
-        content = grid[:-2] if len(grid) > 2 else grid
+        content = grid[1:-2] if len(grid) > 3 else grid
         raw = json.dumps(content, separators=(",", ":")).encode()
         return hashlib.md5(raw).hexdigest()[:12]
 
@@ -1166,6 +1170,11 @@ class ClaudeAgent(Agent):
         else:
             self._consecutive_confirms = 0
 
+        # Reset stuck counter when Claude explicitly resets
+        if tool_name == "reset":
+            self.reasoner.stuck_counter = 0
+            self.message_history.clear()
+
         # Validate action is actually available
         if action.value not in self._available_actions and action != GameAction.RESET:
             logger.warning(f"Claude chose unavailable action {tool_name}, falling back to first available")
@@ -1426,29 +1435,34 @@ IMPORTANT:
 ACTION #{self.action_counter}/{self.MAX_ACTIONS} | Stuck: {self.reasoner.stuck_counter} | Tokens: [{self.input_tokens},{self.output_tokens}]"""
 
     def _build_system_prompt_click(self) -> str:
+        stuck = self.reasoner.get_stuck_guidance()
+        stuck_section = f"\n\n**{stuck}**" if stuck else ""
         return f"""You are solving a visual click-based puzzle on a 64x64 grid.
 
 ONLY ACTION AVAILABLE: Click (provide x,y coordinates 0-63).
 
 STRATEGY:
-1. OBSERVE: Analyze the grid. Identify distinct colored regions, objects, and patterns.
-2. CLICK: Click on objects that look interactive - colored blocks, buttons, distinct features.
-3. WATCH: After each click, carefully observe what changed in the grid.
-4. LEARN: Build understanding of cause-and-effect from your clicks.
-5. SOLVE: Use your understanding to click the right targets in the right order.
+1. OBSERVE: Study the grid image AND the objects list. Identify distinct colored regions and small objects.
+2. CLICK SMALL OBJECTS: Interactive elements are typically small colored objects (4-25 pixels).
+   Large uniform regions (hundreds of pixels) are background, NOT interactive.
+3. WATCH: After each click, check if the grid changed. If nothing changed, that click target was wrong.
+4. SYSTEMATIC: If your clicks aren't working, try DIFFERENT coordinates. Use the objects list to find
+   small distinct-colored objects you haven't tried yet.
+5. NEVER repeat the same click coordinates if nothing changed.
 
 COORDINATE SYSTEM:
 - x=0 left, x=63 right. y=0 top, y=63 bottom.
 - Click coordinates are PIXEL positions on the 64x64 grid.
+- Use the objects list center coordinates for precise clicking.
 
-TIPS:
-- Start by clicking on prominent colored objects
-- The grid may show patterns, targets, or interactive elements
-- Look for small distinct-colored objects (they're often interactive)
-- A timer/progress bar may be present - work efficiently
-- There may be multiple levels with different puzzles
+WHAT TO CLICK:
+- Small colored objects (maroon, teal, cyan, yellow blocks of 4-25 pixels)
+- NOT large background regions (green, black areas of 500+ pixels)
+- NOT the timer bar (row 0 or rows 62-63)
+- Try clicking the CENTER of each small object from the objects list
+- There may be multiple levels — after solving one, a new puzzle appears
 
-ACTION #{self.action_counter}/{self.MAX_ACTIONS} | Tokens: [{self.input_tokens},{self.output_tokens}]"""
+ACTION #{self.action_counter}/{self.MAX_ACTIONS} | Stuck: {self.reasoner.stuck_counter} | Tokens: [{self.input_tokens},{self.output_tokens}]{stuck_section}"""
 
     def _build_system_prompt_movement(self) -> str:
         stuck = self.reasoner.get_stuck_guidance()
@@ -1564,8 +1578,16 @@ RULES LEARNED:
                 parts.append("\nContinue modifying the test output or confirm if complete.")
         else:  # click_only
             parts.append(f"\nObjects on grid:\n{objects_text}")
+            if self.reasoner.stuck_counter >= 3:
+                parts.append(f"\n** STUCK ({self.reasoner.stuck_counter} actions with no grid change). "
+                             f"Your clicks are NOT hitting interactive targets! "
+                             f"Try clicking the CENTER of SMALL objects from the objects list. "
+                             f"Avoid large background regions and the timer bar. **")
             parts.append(f"\nRecent actions:\n{self.reasoner.get_recent_actions_text()}")
-            parts.append("\nClick on interactive elements. Observe changes after each click.")
+            if self.action_counter <= 2:
+                parts.append("\nStudy the image and objects list. Click the center of the SMALLEST distinct colored objects first.")
+            else:
+                parts.append("\nClick a DIFFERENT target. Use object center coordinates from the list above.")
 
         content.append({"type": "text", "text": "\n".join(parts)})
 
