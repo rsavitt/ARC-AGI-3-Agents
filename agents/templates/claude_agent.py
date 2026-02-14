@@ -1473,44 +1473,41 @@ ACTION #{self.action_counter}/{self.MAX_ACTIONS} | Stuck: {self.reasoner.stuck_c
 
         return f"""You are playing a 64x64 grid puzzle game using movement (up/down/left/right).
 
-YOUR TASK: Navigate a maze-like grid to solve a pattern-matching puzzle.
+YOUR TASK: Touch a ROTATION SWITCH to make a pattern match, then enter the TARGET BOX.
 
-THE GRID HAS:
-- A PLAYER (small black+blue sprite, ~5 pixels) that you control
-- GREEN WALLS (color 3) forming corridors and box borders — you CANNOT walk through green
-- YELLOW (4) and GRAY (5) spaces — these are WALKABLE
-- A REFERENCE PATTERN BOX (upper area, ~rows 8-16, cols 32-40) showing the TARGET pattern
-- An ANSWER BOX (bottom-left, ~rows 52-63, cols 0-11) whose pattern CHANGES automatically
-- A MOVING INDICATOR (pink+maroon) that travels through corridors and triggers pattern rotations
-- A TIMER BAR (bottom-right) counting down — ~40 moves per life, 3 lives total
+GRID LAYOUT:
+- PLAYER: Orange+maroon sprite (~5x5px). You start at approximately (x=39, y=45) in the right room.
+- BOX 1 (TARGET): Upper area, rows 8-16, cols 32-40. Contains the FIXED target pattern. Enter here AFTER matching.
+- BOX 2 (DISPLAY): Bottom-left, rows 53-62, cols 1-10. Contains a ROTATABLE pattern.
+- ROTATION SWITCH: Small blue+black object at approximately (x=20-22, y=31-33). Move onto position (x=19, y=30) to activate it.
+- TIMER: ~41 moves per life, 3 lives total. Teal bar at rows 61-62.
+- GREEN (3) = walls (impassable). YELLOW (4) = walkable floor. GRAY (5) = walkable.
 
-HOW THE PUZZLE WORKS:
-- The moving indicator autonomously cycles through the corridors
-- Each time it reaches the reference box area, the answer box pattern ROTATES (cycles through 4 states)
-- You need to navigate your player to the ANSWER BOX (bottom-left area, y>50, x<15) when its pattern MATCHES the reference pattern
-- Walking INTO the answer box area when patterns match completes the level
+HOW IT WORKS:
+1. Box 2's pattern starts in State A (does NOT match Box 1).
+2. Each time you walk onto the SWITCH at (x=19, y=30), Box 2's pattern rotates 90° clockwise.
+3. After exactly 1 touch, Box 2 rotates to State B which MATCHES Box 1's target pattern.
+4. After matching, navigate to BOX 1 (upper area, y~15, x~34) and walk INTO it to complete the level.
+5. WARNING: Touching the switch again rotates AWAY from the match. Touch it exactly ONCE.
 
-STRATEGY:
-1. On your FIRST move, study the image. Note the reference pattern (upper box) and current answer pattern (bottom-left box).
-2. Navigate TOWARD the answer box area (bottom-left: x~5, y~57). Use navigate_to for efficient movement.
-3. Time your entry: watch for when the answer pattern matches the reference.
-4. If the corridor is blocked, use individual moves to find gaps in the green walls.
-
-NAVIGATION:
-- Use navigate_to(x, y) for multi-step movement to a target position.
-- The grid has many green walls. If navigation gets stuck at walls, try individual moves to find openings.
-- Corridors have gaps/openings — look for yellow/gray pixels between green walls.
-- You can also use individual move_up/down/left/right for fine control.
+OPTIMAL STRATEGY (13 moves):
+1. navigate_to(19, 30) — move LEFT and UP to reach the switch. This rotates Box 2 to match.
+2. navigate_to(34, 15) — move UP and RIGHT to enter Box 1. Level complete!
 
 COORDINATE SYSTEM:
 - x=0 left, x=63 right. y=0 top, y=63 bottom.
 - move_up: y-=5. move_down: y+=5. move_left: x-=5. move_right: x+=5.
 
-CRITICAL:
-- DO NOT wander randomly. Every move costs timer. Be efficient and purposeful.
-- The answer box is in the BOTTOM-LEFT (low x, high y). Navigate there.
-- Green pixels are walls. Only walk through yellow or gray pixels.
-- If navigate_to fails repeatedly to a target, try approaching from a different direction.
+NAVIGATION:
+- Use navigate_to(x, y) for efficient multi-step movement.
+- If navigate_to gets stuck at walls, use individual moves to find openings.
+- The switch is in the LEFT room. Box 1 is in the UPPER area connected by a corridor.
+
+CRITICAL RULES:
+- Touch the switch EXACTLY ONCE, then go to Box 1.
+- Do NOT touch the switch more than once (it rotates away from the match).
+- Do NOT wander — every move costs timer. Follow the optimal path.
+- You have ~41 moves per life. The solution needs ~13 moves. Be efficient.
 
 RULES LEARNED:
 {self.reasoner.get_rules_text()}{progress_section}{stuck_section}"""
@@ -1558,11 +1555,14 @@ RULES LEARNED:
                 parts.append(f"\n{progress}")
             parts.append(f"\nObjects on grid (sorted by size):\n{objects_text}")
             parts.append(f"\nRecent actions (Y=moved, N=wall):\n{self.reasoner.get_recent_actions_text()}")
-            if self.action_counter <= 5:
-                parts.append("\nFIRST PRIORITY: Study the grid. Find the reference pattern (upper area) and answer box (bottom-left).")
-                parts.append("Navigate toward the answer box area (bottom-left: low x, high y).")
+            if self.action_counter <= 2:
+                parts.append("\nSTEP 1: Navigate to the SWITCH at (x=19, y=30). Use navigate_to(19, 30).")
+                parts.append("This will rotate Box 2's pattern to match the target.")
+            elif self.action_counter <= 8:
+                parts.append("\nSTEP 2: Now navigate to BOX 1 (TARGET) at (x=34, y=15). Use navigate_to(34, 15).")
+                parts.append("Entering Box 1 with matching pattern completes the level.")
             else:
-                parts.append("\nChoose your next move. Navigate toward the answer box or find corridor openings.")
+                parts.append("\nIf stuck, try individual moves to find wall openings. Goal: reach Box 1 at upper area.")
         elif self._game_type == "arc_puzzle":
             parts.append(f"\nObjects on grid:\n{objects_text}")
             if self.reasoner.stuck_counter >= 3:
