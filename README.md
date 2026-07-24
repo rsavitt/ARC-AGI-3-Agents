@@ -33,10 +33,10 @@ For more information, see the [documentation](https://three.arcprize.org/docs#qu
 
 ## Changelog
 ## [0.9.3] - 2026-01-29
-**Note: This will be a breaking change is you use the fields outline below**
+**Note: This will be a breaking change if you use the fields listed below**
 
 ### Added
-- `FrameData` had two field names changes. 
+- `FrameData` has two field name changes: 
   - `score` changed to `levels_completed`
   - `win_score` changed to `win_levels`
 - Updated to use the new [ARC-AGI](https://github.com/arcprize/ARC-AGI) tool
